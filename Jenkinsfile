@@ -1,90 +1,79 @@
+
 pipeline {
     agent any
 
     environment {
-        APP_NAME      = "netflix-clone"
-        IMAGE_NAME    = "netflix-clone"
-        IMAGE_TAG     = "v1"
-        DOCKERFILE    = "Dockerfile"
-        BUILD_CONTEXT = "."
-        K8S_PATH      = "Kubernetes"
+        DOCKERHUB_CREDENTIALS = 'dockerhub-credentials'     // Jenkins credentials ID for Docker Hub
+        DOCKER_IMAGE = 'aisalkyn85/spring-boot-app'          // Replace with your Docker Hub repo
+        DOCKER_TAG = "v${BUILD_NUMBER}"
+        KUBE_DEPLOYMENT = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml'
+        KUBE_SERVICE = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/service.yml'
     }
 
     stages {
-        stage('Checkout Repository') {
+
+        stage('Checkout Code') {
             steps {
-                echo "📦 Checking out repository..."
-                git branch: 'main', url: 'https://github.com/Aisalkyn85/Netflix-clone.git'
-                sh 'ls -R'
+                echo '📦 Checking out code from GitHub...'
+                git branch: 'main', url: 'https://github.com/Aisalkyn85/Jenkins-Zero-To-Hero.git'
+                sh 'ls -la'
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Build with Maven') {
             steps {
-                echo "📥 Installing dependencies..."
+                echo '⚙️ Building Spring Boot app using Maven...'
                 sh '''
-                    if [ -f yarn.lock ]; then
-                        yarn install
-                    else
-                        npm install
-                    fi
-                '''
-            }
-        }
-
-        stage('Build React App') {
-            steps {
-                echo "🏗️ Building Netflix Clone app..."
-                sh '''
-                    if [ -f yarn.lock ]; then
-                        yarn build
-                    else
-                        npm run build
-                    fi
+                    cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+                    mvn clean package -DskipTests
                 '''
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "🐳 Building Docker image..."
-                sh '''
-                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -f ${DOCKERFILE} ${BUILD_CONTEXT}
-                '''
+                echo '🐳 Building Docker image...'
+                script {
+                    sh '''
+                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+                        docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
+                    '''
+                }
             }
         }
 
-        stage('Run Docker Container') {
+        stage('Push Docker Image to Docker Hub') {
             steps {
+                echo '📤 Pushing Docker image to Docker Hub...'
                 script {
-                    echo "🧹 Cleaning old containers..."
-                    sh '''
-                        docker rm -f ${APP_NAME} || true
-                        docker run -d -p 8080:80 --name ${APP_NAME} ${IMAGE_NAME}:${IMAGE_TAG}
-                        docker ps
-                    '''
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
+                        sh "docker push $DOCKER_IMAGE:$DOCKER_TAG"
+                    }
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo "🚀 Deploying to Kubernetes..."
-                sh '''
-                    kubectl apply -f ${K8S_PATH}/deployment.yml
-                    kubectl apply -f ${K8S_PATH}/service.yml
-                    kubectl get pods -o wide
-                '''
+                echo '🚀 Deploying to Kubernetes (Minikube)...'
+                script {
+                    sh '''
+                        kubectl apply -f $KUBE_DEPLOYMENT
+                        kubectl apply -f $KUBE_SERVICE
+                        kubectl rollout status deployment/spring-boot-app
+                        kubectl get pods -o wide
+                    '''
+                }
             }
         }
     }
 
     post {
         success {
-            echo "🎉 Netflix Clone successfully built and deployed!"
+            echo '✅ Pipeline completed successfully!'
         }
         failure {
-            echo "❌ Pipeline failed. Check logs for details."
+            echo '❌ Pipeline failed. Check Jenkins logs for details.'
         }
     }
 }
