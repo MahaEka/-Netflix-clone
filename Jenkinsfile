@@ -1,53 +1,47 @@
-
 pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = 'dockerhub-credentials'     // Jenkins credentials ID for Docker Hub
-        DOCKER_IMAGE = 'aisalkyn85/spring-boot-app'          // Replace with your Docker Hub repo
-        DOCKER_TAG = "v${BUILD_NUMBER}"
-        KUBE_DEPLOYMENT = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml'
-        KUBE_SERVICE = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/service.yml'
+        DOCKERHUB_CREDENTIALS = 'dockerhub-credentials-id'   // 🔹 Jenkins credentials ID for Docker Hub
+        DOCKERHUB_USER = 'aisalkyn85'                        // 🔹 Your Docker Hub username
+        IMAGE_NAME = 'spring-boot-app'
+        APP_PATH = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app'
+        KUBE_PATH = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests'
     }
 
     stages {
-
-        stage('Checkout Code') {
+        stage('Checkout Repository') {
             steps {
-                echo '📦 Checking out code from GitHub...'
-                git branch: 'main', url: 'https://github.com/Aisalkyn85/Jenkins-Zero-To-Hero.git'
-                sh 'ls -la'
+                echo '📦 Checking out repository from GitHub...'
+                checkout scm
+                sh 'ls -l'
             }
         }
 
-        stage('Build with Maven') {
+        stage('Build Spring Boot JAR with Maven') {
             steps {
-                echo '⚙️ Building Spring Boot app using Maven...'
-                sh '''
-                    cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-                    mvn clean package -DskipTests
-                '''
+                echo '⚙️ Building Spring Boot app...'
+                dir("${APP_PATH}") {
+                    sh 'mvn clean package -DskipTests'
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 echo '🐳 Building Docker image...'
-                script {
-                    sh '''
-                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-                        docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
-                    '''
+                dir("${APP_PATH}") {
+                    sh 'docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER} .'
                 }
             }
         }
 
         stage('Push Docker Image to Docker Hub') {
             steps {
-                echo '📤 Pushing Docker image to Docker Hub...'
+                echo '🚀 Pushing Docker image to Docker Hub...'
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
-                        sh "docker push $DOCKER_IMAGE:$DOCKER_TAG"
+                        sh 'docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER}'
                     }
                 }
             }
@@ -55,22 +49,28 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo '🚀 Deploying to Kubernetes (Minikube)...'
-                script {
+                echo '☸️ Deploying to Kubernetes...'
+                dir("${KUBE_PATH}") {
                     sh '''
-                        kubectl apply -f $KUBE_DEPLOYMENT
-                        kubectl apply -f $KUBE_SERVICE
-                        kubectl rollout status deployment/spring-boot-app
-                        kubectl get pods -o wide
+                        kubectl apply -f deployment.yml
+                        kubectl apply -f service.yml
                     '''
                 }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                echo '🔍 Checking Kubernetes deployment status...'
+                sh 'kubectl get pods -o wide'
+                sh 'kubectl get svc'
             }
         }
     }
 
     post {
         success {
-            echo '✅ Pipeline completed successfully!'
+            echo '✅ Deployment completed successfully!'
         }
         failure {
             echo '❌ Pipeline failed. Check Jenkins logs for details.'
