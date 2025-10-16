@@ -2,26 +2,18 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = 'dockerhub-credentials-id'   // 🔹 Jenkins credentials ID for Docker Hub
-        DOCKERHUB_USER = 'aisalkyn85'                        // 🔹 Your Docker Hub username
+        DOCKERHUB_USER = 'aisalkyn85'
         IMAGE_NAME = 'spring-boot-app'
-        APP_PATH = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app'
-        KUBE_PATH = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests'
+        VERSION = 'v1'
     }
 
     stages {
-        stage('Checkout Repository') {
-            steps {
-                echo '📦 Checking out repository from GitHub...'
-                checkout scm
-                sh 'ls -l'
-            }
-        }
 
         stage('Build Spring Boot JAR with Maven') {
             steps {
-                echo '⚙️ Building Spring Boot app...'
-                dir("${APP_PATH}") {
+                echo "⚙️ Building Spring Boot app..."
+                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
+                    sh 'ls -l'
                     sh 'mvn clean package -DskipTests'
                 }
             }
@@ -29,51 +21,45 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo '🐳 Building Docker image...'
-                dir("${APP_PATH}") {
-                    sh 'docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER} .'
+                echo "🐳 Building Docker image..."
+                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
+                    sh 'docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION} .'
                 }
             }
         }
 
         stage('Push Docker Image to Docker Hub') {
             steps {
-                echo '🚀 Pushing Docker image to Docker Hub...'
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
-                        sh 'docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER}'
-                    }
-                }
+                echo "📤 Pushing image to Docker Hub..."
+                sh 'echo "${DOCKERHUB_TOKEN}" | docker login -u ${DOCKERHUB_USER} --password-stdin'
+                sh 'docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION}'
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo '☸️ Deploying to Kubernetes...'
-                dir("${KUBE_PATH}") {
-                    sh '''
-                        kubectl apply -f deployment.yml
-                        kubectl apply -f service.yml
-                    '''
+                echo "🚀 Deploying to Minikube..."
+                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-manifests') {
+                    sh 'kubectl apply -f deployment.yml'
+                    sh 'kubectl apply -f service.yml'
                 }
             }
         }
 
         stage('Verify Deployment') {
             steps {
-                echo '🔍 Checking Kubernetes deployment status...'
-                sh 'kubectl get pods -o wide'
+                sh 'kubectl get pods'
                 sh 'kubectl get svc'
             }
         }
     }
 
     post {
-        success {
-            echo '✅ Deployment completed successfully!'
-        }
         failure {
-            echo '❌ Pipeline failed. Check Jenkins logs for details.'
+            echo "❌ Pipeline failed. Check Jenkins logs for details."
+        }
+        success {
+            echo "✅ Deployment completed successfully!"
         }
     }
 }
