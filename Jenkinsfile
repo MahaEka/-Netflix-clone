@@ -3,63 +3,87 @@ pipeline {
 
     environment {
         DOCKERHUB_USER = 'aisalkyn85'
-        IMAGE_NAME = 'spring-boot-app'
-        VERSION = 'v1'
+        IMAGE_NAME = 'netflix-clone'
+        VERSION = "v1"
+        TMDB_V3_API_KEY = credentials('tmdb-api-key')  // Optional: store API key in Jenkins credentials
     }
 
     stages {
 
-        stage('Build Spring Boot JAR with Maven') {
+        stage('Checkout Code') {
             steps {
-                echo "⚙️ Building Spring Boot app..."
-                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
-                    sh 'ls -l'
-                    sh 'mvn clean package -DskipTests'
-                }
+                echo "📦 Cloning project..."
+                checkout scm
+                sh 'ls -l'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo "📥 Installing dependencies..."
+                sh '''
+                    if [ -f yarn.lock ]; then
+                        yarn install
+                    else
+                        npm install
+                    fi
+                '''
+            }
+        }
+
+        stage('Build React App') {
+            steps {
+                echo "🏗️ Building Netflix Clone app..."
+                sh '''
+                    if [ -f yarn.lock ]; then
+                        yarn build
+                    else
+                        npm run build
+                    fi
+                '''
+                sh 'ls -l dist || ls -l build'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 echo "🐳 Building Docker image..."
-                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
-                    sh 'docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION} .'
-                }
+                sh 'docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION} --build-arg TMDB_V3_API_KEY=${TMDB_V3_API_KEY} .'
             }
         }
 
         stage('Push Docker Image to Docker Hub') {
             steps {
                 echo "📤 Pushing image to Docker Hub..."
-                sh 'echo "${DOCKERHUB_TOKEN}" | docker login -u ${DOCKERHUB_USER} --password-stdin'
-                sh 'docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION}'
+                withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    sh '''
+                        echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
+                        docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION}
+                    '''
+                }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo "🚀 Deploying to Minikube..."
-                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-manifests') {
-                    sh 'kubectl apply -f deployment.yml'
-                    sh 'kubectl apply -f service.yml'
-                }
-            }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                sh 'kubectl get pods'
-                sh 'kubectl get svc'
+                echo "🚀 Deploying Netflix Clone to Kubernetes..."
+                sh '''
+                    kubectl apply -f Kubernetes/deployment.yml
+                    kubectl apply -f Kubernetes/service.yml
+                    sleep 10
+                    kubectl get pods
+                    kubectl get svc
+                '''
             }
         }
     }
 
     post {
+        success {
+            echo "✅ Netflix Clone deployed successfully!"
+        }
         failure {
             echo "❌ Pipeline failed. Check Jenkins logs for details."
-        }
-        success {
-            echo "✅ Deployment completed successfully!"
         }
     }
 }
