@@ -1,5 +1,4 @@
-
-        stage('Build React App') pipeline {
+ pipeline {
     agent any
 
     environment {
